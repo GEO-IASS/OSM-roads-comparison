@@ -265,9 +265,8 @@ def main():
                               name=[newfdata, newbuffer, newodata])
 
     ## Clean output map
-    l_map = grass.read_command("g.list", type="vect",
-                               quiet=True).split("\n")[0:-1]
-    last_map = [s for s in l_map if "patch" in s]
+    last_map = grass.read_command("g.list", type="vect", pattern="patch*",
+                                  quiet=True).split("\n")[0:-1]
     grass.run_command("v.buffer", input=last_map[0], output=outbuff,
                       distance=0.0001, quiet=True)
     grass.run_command("v.overlay", ainput=osm_orig, atype="line",
