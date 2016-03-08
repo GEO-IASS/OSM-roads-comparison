@@ -64,11 +64,20 @@
 #% required: no
 #%end
 
+#%option
+#% key: nprocs
+#% type: integer
+#% description: Number of r.series processes to run in parallel
+#% required: no
+#% multiple: no
+#% answer: 1
+#%end
+
 import math
 import sys
-import shutil
 import time
 import grass.script as grass
+from multiprocessing import Queue, Process
 
 
 def length(data):
@@ -102,6 +111,81 @@ def GetCoeff(vect):
     return m
 
 
+def AngulatComparison(f, processid, ref, osm, bf, list_lines, angle_thres):
+    i = 0
+    z = 0
+    fdata = "fdata_" + processid
+    fbuffer = "fbuffer_" + processid
+    odata = "odata_" + processid
+    patch = "patch_" + processid
+    newfdata = "{da}_{su}".format(da=fdata, su=f)
+    newbuffer = "{da}_{su}".format(da=fbuffer, su=f)
+    newodata = "{da}_{su}".format(da=odata, su=f)
+    grass.run_command("v.extract", input=ref, overwrite=True, quiet=True,
+                      output=newfdata, where="cat={st}".format(st=f))
+    if f in list_lines:
+        grass.run_command("v.buffer", flags="c", distance=bf, quiet=True,
+                          input=newfdata, output=newbuffer, overwrite=True)
+    else:
+        grass.run_command("v.buffer", distance=bf, quiet=True,
+                          input=newfdata, output=newbuffer, overwrite=True)
+
+    grass.run_command("v.overlay", ainput=osm, atype="line", quiet=True,
+                      binput=newbuffer, output=newodata,
+                      operator="and", overwrite=True)
+    lines = ((grass.read_command("v.info", flags="t", quiet=True,
+                                 map=newodata)).split("\n")[2]).split("=")[1]
+    if int(lines) == 0:
+        grass.run_command("g.remove", type="vect", flags="f", quiet=True,
+                          name=[newfdata, newbuffer, newodata])
+    else:
+        # Get REF angular coefficient
+        list_subfeature = grass.read_command("v.db.select", map=newodata,
+                                             columns="cat", flags="c",
+                                             quiet=True).split("\n")[0:-1]
+        m_ref = GetCoeff(newfdata)
+
+        # Get OSM subfeatures angular coefficient
+        for sf in list_subfeature:
+            newnewodata = "{pre}_{suf}".format(pre=newodata, suf=sf)
+            grass.run_command("v.extract", input=newodata,
+                              output=newnewodata, overwrite=True,
+                              where="cat={st}".format(st=sf), quiet=True)
+            m_osm = GetCoeff(newnewodata)
+
+
+            new_angle = math.degrees(abs(math.atan((m_ref - m_osm) / (1 + m_ref * m_osm))))
+            if new_angle <= angle_thres:
+                newpatch = "{pr}_{il}_{su}".format(pr=newodata, il=i,
+                                                   su=z)
+                grass.run_command("v.patch", overwrite=True, quiet=True,
+                                  input="{fi},{se}".format(fi=newpatch,
+                                                           se=newnewodata),
+                                  output="{pr}_{fe}_{st}".format(pr=patch,
+                                                                 fe=f, st=sf))
+                grass.run_command("g.remove", type="vect", flags="f",
+                                  name="{fi},{se}".format(fi=newpatch,
+                                                          se=newnewodata),
+                                  quiet=True)
+                i = f
+                z = sf
+            else:
+                grass.run_command("g.remove", type="vect",
+                                  name=newnewodata, flags="f", quiet=True)
+        grass.run_command("g.remove", type="vect", flags="f", quiet=True,
+                          name=[newfdata, newbuffer, newodata])
+
+
+def spawn(func):
+    def fun(q_in, q_out):
+        while True:
+            f, process, ref, osm, bf, list_lines, angle_thres = q_in.get()
+            if f is None:
+                break
+            q_out.put(func(f, process, ref, osm, bf, list_lines, angle_thres))
+    return fun
+
+
 def main():
     osm = options["osm"]
     ref = options["ref"]
@@ -110,15 +194,16 @@ def main():
     doug = options["douglas_thres"]
     out = options["output"]
     out_file = options["out_file"]
+    nproc = options["nprocs"]
 
-    ## Check if input files exist
+    # Check if input files exist
     if not grass.find_file(name=osm, element='vector')['file']:
         grass.fatal(_("Vector map <%s> not found") % osm)
 
     if not grass.find_file(name=ref, element='vector')['file']:
         grass.fatal(_("Vector map <%s> not found") % ref)
 
-    ## Prepare temporary map names
+    # Prepare temporary map names
     processid = str(time.time()).replace(".", "_")
     ref_gen = "ref_gen_" + processid
     ref_split = "ref_split_" + processid
@@ -126,14 +211,10 @@ def main():
     deg_points = "deg_points_" + processid
     degmin_points = "degmin_points_" + processid
     ref_degmin = "ref_degmin_" + processid
-    patch = "patch_" + processid
-    fdata = "fdata_" + processid
-    fbuffer = "fbuffer_" + processid
-    odata = "odata_" + processid
-    osdata = "osdata_" + processid
+
     outbuff = "outbuff_" + processid
 
-    ## Calculate length original data
+    # Calculate length original data
     l_osm = length(osm)
     l_ref = length(ref)
 
@@ -148,13 +229,13 @@ def main():
         grass.fatal(_("No OSM data for comparison"))
 
 
-    ## Generalize
+    # Generalize
     if doug:
         grass.run_command("v.generalize", input=ref, output=ref_gen,
                           method="douglas", threshold=doug, quiet=True)
         ref = ref_gen
 
-    ## Split REF dataset
+    # Split REF dataset
     newrefsplit = "new_{spl}".format(spl=ref_split)
     grass.run_command("v.split", input=ref, output=ref_split, vertices=2,
                       quiet=True)
@@ -168,7 +249,7 @@ def main():
                                                               out=ref_split))
     ref = ref_split
 
-    ## Split OSM datasets
+    # Split OSM datasets
     newosmsplit = "new_{spl}".format(spl=osm_split)
     grass.run_command("v.split", input=osm, output=osm_split, vertices=2,
                       quiet=True)
@@ -197,74 +278,34 @@ def main():
                                      columns="cat", flags="c",
                                      quiet=True)).split("\n")[0:-1]
 
-    ## Create new vector map
-    grass.run_command("v.edit", map=patch+"_0_0", tool="create", quiet=True)
+    # Create new vector map
+    grass.run_command("v.edit", map="patch_" + processid+"_0_0", tool="create", quiet=True)
 
     list_feature = grass.read_command("v.db.select", map=ref, columns="cat",
                                       flags="c", quiet=True).split("\n")[0:-1]
-    i = 0
-    z = 0
 
-    ## Angular coefficient Comparison
-    for f in list_feature:
-        newfdata = "{da}_{su}".format(da=fdata, su=f)
-        newbuffer = "{da}_{su}".format(da=fbuffer, su=f)
-        newodata = "{da}_{su}".format(da=odata, su=f)
-        grass.run_command("v.extract", input=ref, overwrite=True, quiet=True,
-                          output=newfdata, where="cat={st}".format(st=f))
-        if f in list_lines:
-            grass.run_command("v.buffer", flags="c", distance=bf, quiet=True,
-                              input=newfdata, output=newbuffer, overwrite=True)
-        else:
-            grass.run_command("v.buffer", distance=bf, quiet=True,
-                              input=newfdata, output=newbuffer, overwrite=True)
+    # multiprocessing stuff for Angular coefficient Comparison
+    q_in = Queue(1)
+    q_out = Queue()
+    procs = [Process(target=spawn(AngulatComparison), args=(q_in, q_out))
+             for _ in range(nproc)]
+    for proc in procs:
+        proc.daemon = True
+        proc.start()
+    # for each file create the polygon of bounding box
+    sent = [q_in.put((f, processid, ref, osm, bf, list_lines,
+                      angle_thres)) for f in list_feature]
 
-        grass.run_command("v.overlay", ainput=osm, atype="line", quiet=True,
-                          binput=newbuffer, output=newodata,
-                          operator="and", overwrite=True)
-        lines = ((grass.read_command("v.info", flags="t", quiet=True,
-                                     map=newodata)).split("\n")[2]).split("=")[1]
-        if int(lines) == 0:
-            grass.run_command("g.remove", type="vect", flags="f", quiet=True,
-                              name=[newfdata, newbuffer, newodata])
-        else:
-            ## Get REF angular coefficient
-            list_subfeature = grass.read_command("v.db.select", map=newodata,
-                                                 columns="cat", flags="c",
-                                                 quiet=True).split("\n")[0:-1]
-            m_ref = GetCoeff(newfdata)
-            #print m_ref
+    # set the end of the cycle
+    [q_in.put((None, None, None, None, None, None, None)) for proc in procs]
+    [proc.join() for proc in procs]
+    processed = [q_out.get() for _ in range(len(sent))]
+    errors = [p for p in processed if not p[2]]
+    if errors:
+        print "Some errors occurred during analysis"
+        return 0
 
-            ## Get OSM subfeatures angular coefficient
-            for sf in list_subfeature:
-                newnewodata = "{pre}_{suf}".format(pre=newodata, suf=sf)
-                grass.run_command("v.extract", input=newodata,
-                                  output=newnewodata, overwrite=True,
-                                  where="cat={st}".format(st=sf), quiet=True)
-                m_osm = GetCoeff(newnewodata)
-
-
-                new_angle = math.degrees(abs(math.atan((m_ref - m_osm) / (1 + m_ref * m_osm))))
-                if new_angle <= angle_thres:
-                    newpatch = "{pr}_{il}_{su}".format(pr=newodata, il=i,
-                                                       su=z)
-                    grass.run_command("v.patch", overwrite=True, quiet=True,
-                                      input="{fi},{se}".format(fi=newpatch,
-                                                               se=newnewodata),
-                                      output=patch+"_%s_%s"%(f,sf))
-                    grass.run_command("g.remove", type="vect", flags="f",
-                                      name="{fi},{se}".format(fi=newpatch,
-                                                              se=newnewodata),
-                                      quiet=True)
-                    i = f
-                    z = sf
-                else:
-                    grass.run_command("g.remove", type="vect",
-                                      name=newnewodata, flags="f", quiet=True)
-            grass.run_command("g.remove", type="vect", flags="f", quiet=True,
-                              name=[newfdata, newbuffer, newodata])
-
-    ## Clean output map
+    # Clean output map
     last_map = grass.read_command("g.list", type="vect", pattern="patch*",
                                   quiet=True).split("\n")[0:-1]
     grass.run_command("v.buffer", input=last_map[0], output=outbuff,
@@ -273,7 +314,7 @@ def main():
                       binput=outbuff, output=out, operator="and",
                       flags="t", quiet=True)
 
-    ## Delete all maps
+    # Delete all maps
     grass.run_command("g.remove", type="vect", flags="f",
                       name=[deg_points, ref_degmin, degmin_points, ref_gen,
                             ref_split, osm_split, outbuff], quiet=True)
@@ -281,14 +322,14 @@ def main():
     grass.run_command("g.remove", type="vect",
                       name=last_map[0], flags="f", quiet=True)
 
-    ## Calculate final map statistics
+    # Calculate final map statistics
     l_osm_proc = length(out)
     diff_osm = l_osm - l_osm_proc
     diff_p_osm = diff_osm/l_osm*100
     diff_new = l_ref - l_osm_proc
     diff_p_new = diff_new/l_ref*100
 
-    ##  Write output file with statistics (if required)
+    #  Write output file with statistics (if required)
     if len(out_file) > 0:
         fil=open(out_file, "w")
         fil.write("REF dataset length: %s m\n"%(round(l_ref,1)))
@@ -298,7 +339,7 @@ def main():
         fil.write("Difference between REF dataset and processed OSM dataset length: %s m (%s%%)\n"%(round(diff_new,1),round(diff_p_new,1)))
         fil.close()
 
-    ## Print statistics
+    # Print statistics
     print("#####################################################################\n")
     print("Original OSM dataset length: %s m\n"%(round(l_osm,1)))
     print("Processed OSM dataset length: %s m\n"%(round(l_osm_proc,1)))
