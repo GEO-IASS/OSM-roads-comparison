@@ -154,25 +154,33 @@ def main():
                           method="douglas", threshold=doug, quiet=True)
         ref = ref_gen
 
-    ## Split REF datasets
+    ## Split REF dataset
+    newrefsplit = "new_{spl}".format(spl=ref_split)
     grass.run_command("v.split", input=ref, output=ref_split, vertices=2,
                       quiet=True)
-    grass.run_command("v.out.ogr", input=ref_split,output="/tmp/%s"%ref_split,flags="s",quiet=True)
-    grass.run_command("g.remove", type="vect",name=ref_split,flags="f",quiet=True)
-    grass.run_command("v.in.ogr", input="/tmp/%s/%s.shp"%(ref_split,ref_split),output=ref_split,quiet=True)
+    grass.run_command('v.build.polylines', quiet=True, input=ref_split,
+                      overwrite=grass.overwrite(), cats='same',
+                      output=newrefsplit)
+
+    grass.run_command("g.remove", type="vect", name=ref_split, flags="f",
+                      quiet=True)
+    grass.run_command("g.rename", vector="{inp},{out}".format(inp=newrefsplit,
+                                                              out=ref_split))
     ref = ref_split
-    shutil.rmtree('/tmp/%s/'%ref_split)
 
     ## Split OSM datasets
+    newosmsplit = "new_{spl}".format(spl=osm_split)
     grass.run_command("v.split", input=osm, output=osm_split, vertices=2,
                       quiet=True)
-    grass.run_command("v.out.ogr",input=osm_split,output="/tmp/%s"%osm_split,flags="s",quiet=True)
-    grass.run_command("g.remove",type="vect",name=osm_split,flags="f",quiet=True)
-    grass.run_command("v.in.ogr",input="/tmp/%s/%s.shp"%(osm_split,osm_split),output=osm_split,quiet=True)
+    grass.run_command('v.build.polylines', quiet=True, input=osm_split,
+                      overwrite=grass.overwrite(), cats='same',
+                      output=newosmsplit)
+    grass.run_command("g.remove", type="vect", name=osm_split, flags="f",
+                      quiet=True)
+    grass.run_command("g.rename", vector="{inp},{out}".format(inp=newosmsplit,
+                                                              out=osm_split))
     osm_orig = osm
     osm = osm_split
-    shutil.rmtree('/tmp/%s/'%osm_split)
-
     # Calculate degree and extract REF category lines intersecting points with minimum value
     grass.run_command("v.net.centrality", input=ref, output=deg_points,
                       degree="degree", flags="a", quiet=True)
