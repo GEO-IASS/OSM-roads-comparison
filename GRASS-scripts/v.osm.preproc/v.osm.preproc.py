@@ -98,15 +98,18 @@ def length(data):
 def GetCoeff(vect):
     coord_start = grass.read_command("v.to.db", map=vect, option="start",
                                      type="line", flags="p").split("\n")[1]
-    x_start = float(coord_start.split("|")[1])
-    y_start = float(coord_start.split("|")[2])
-    coord_end = grass.read_command("v.to.db", map=vect, option="end",
-                                   type="line", flags="p").split("\n")[1]
-    x_end = float(coord_end.split("|")[1])
-    y_end = float(coord_end.split("|")[2])
-    if (x_end - x_start) != 0:
-        m = (y_end - y_start) / (x_end - x_start)
-    else:
+    try:
+        x_start = float(coord_start.split("|")[1])
+        y_start = float(coord_start.split("|")[2])
+        coord_end = grass.read_command("v.to.db", map=vect, option="end",
+                                       type="line", flags="p").split("\n")[1]
+        x_end = float(coord_end.split("|")[1])
+        y_end = float(coord_end.split("|")[2])
+        if (x_end - x_start) != 0:
+            m = (y_end - y_start) / (x_end - x_start)
+        else:
+            m = 10**9
+    except:
         m = 10**9
     return m
 
@@ -269,7 +272,7 @@ def main():
     list_values = (grass.read_command("v.db.select", map=deg_points,
                                       columns="degree", flags="c",
                                       quiet=True)).split("\n")[0:-1]
-    degmin = min(map(float,list_values))
+    degmin = min(map(float, list_values))
 
     grass.run_command("v.extract", input=deg_points, output=degmin_points,
                       where="degree={st}".format(st=degmin), quiet=True)
@@ -299,20 +302,14 @@ def main():
     for proc in procs:
         proc.daemon = True
         proc.start()
-    print "PRIMA SENT"
     # for each file create the polygon of bounding box
     [q_in.put((f, processid, ref, osm, bf, list_lines,
                angle_thres)) for f in list_feature]
-    print "DOPO SENT"
     # set the end of the cycle
     [q_in.put((None, None, None, None, None, None, None)) for proc in procs]
-    print "DOPO NONE"
     [proc.join() for proc in procs]
-    print "DOPO JOIN"
     processed = [q_out.get() for _ in procs]
-    print "DOPO GET"
     errors = [p for p in processed if p]
-    print "DOPO ERRORS"
     if errors:
         print "Some errors occurred during analysis"
         return 0
@@ -322,7 +319,10 @@ def main():
     # Clean output map
     last_map = grass.read_command("g.list", type="vect", pattern="patch*",
                                   quiet=True).split("\n")[0:-1]
-    grass.run_command("v.buffer", input=last_map[0], output=outbuff,
+    finalpatch = "patch_{idd}_final".format(idd=processid)
+    grass.run_command("v.patch", input=last_map, output=finalpatch,
+                      quiet=True)
+    grass.run_command("v.buffer", input=finalpatch, output=outbuff,
                       distance=0.0001, quiet=True)
     grass.run_command("v.overlay", ainput=osm_orig, atype="line",
                       binput=outbuff, output=out, operator="and",
@@ -333,8 +333,8 @@ def main():
                       name=[deg_points, ref_degmin, degmin_points, ref_gen,
                             ref_split, osm_split, outbuff], quiet=True)
 
-    grass.run_command("g.remove", type="vect",
-                      name=last_map[0], flags="f", quiet=True)
+    grass.run_command("g.remove", flags="f", type="vect",
+                      pattern="*{idd}*".format(idd=processid), quiet=True)
 
     # Calculate final map statistics
     l_osm_proc = length(out)
