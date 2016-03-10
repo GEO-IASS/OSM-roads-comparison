@@ -112,7 +112,6 @@ def GetCoeff(vect):
 
 
 def AngulatComparison(f, processid, ref, osm, bf, list_lines, angle_thres):
-    i = 0
     z = 0
     fdata = "fdata_" + processid
     fbuffer = "fbuffer_" + processid
@@ -121,18 +120,21 @@ def AngulatComparison(f, processid, ref, osm, bf, list_lines, angle_thres):
     newfdata = "{da}_{su}".format(da=fdata, su=f)
     newbuffer = "{da}_{su}".format(da=fbuffer, su=f)
     newodata = "{da}_{su}".format(da=odata, su=f)
-    grass.run_command("v.extract", input=ref, overwrite=True, quiet=True,
+    grass.run_command("v.extract", input=ref, quiet=True,
                       output=newfdata, where="cat={st}".format(st=f))
+    grass.run_command("g.copy",
+                      vect="patch_{pr}_0_0,{su}_{fe}_0".format(pr=processid,
+                                                               su=patch,
+                                                               fe=f))
     if f in list_lines:
         grass.run_command("v.buffer", flags="c", distance=bf, quiet=True,
-                          input=newfdata, output=newbuffer, overwrite=True)
+                          input=newfdata, output=newbuffer)
     else:
         grass.run_command("v.buffer", distance=bf, quiet=True,
-                          input=newfdata, output=newbuffer, overwrite=True)
-
+                          input=newfdata, output=newbuffer)
     grass.run_command("v.overlay", ainput=osm, atype="line", quiet=True,
                       binput=newbuffer, output=newodata,
-                      operator="and", overwrite=True)
+                      operator="and")
     lines = ((grass.read_command("v.info", flags="t", quiet=True,
                                  map=newodata)).split("\n")[2]).split("=")[1]
     if int(lines) == 0:
@@ -149,31 +151,30 @@ def AngulatComparison(f, processid, ref, osm, bf, list_lines, angle_thres):
         for sf in list_subfeature:
             newnewodata = "{pre}_{suf}".format(pre=newodata, suf=sf)
             grass.run_command("v.extract", input=newodata,
-                              output=newnewodata, overwrite=True,
+                              output=newnewodata,
                               where="cat={st}".format(st=sf), quiet=True)
             m_osm = GetCoeff(newnewodata)
 
 
             new_angle = math.degrees(abs(math.atan((m_ref - m_osm) / (1 + m_ref * m_osm))))
             if new_angle <= angle_thres:
-                newpatch = "{pr}_{il}_{su}".format(pr=newodata, il=i,
-                                                   su=z)
-                grass.run_command("v.patch", overwrite=True, quiet=True,
+                newpatch = "{pr}_{il}_{su}".format(pr=patch, il=f, su=z)
+                outpatch = "{pr}_{fe}_{st}".format(pr=patch, fe=f, st=sf)
+                grass.run_command("v.patch", quiet=True,
                                   input="{fi},{se}".format(fi=newpatch,
                                                            se=newnewodata),
-                                  output="{pr}_{fe}_{st}".format(pr=patch,
-                                                                 fe=f, st=sf))
+                                  output=outpatch)
                 grass.run_command("g.remove", type="vect", flags="f",
                                   name="{fi},{se}".format(fi=newpatch,
                                                           se=newnewodata),
                                   quiet=True)
-                i = f
                 z = sf
             else:
                 grass.run_command("g.remove", type="vect",
                                   name=newnewodata, flags="f", quiet=True)
         grass.run_command("g.remove", type="vect", flags="f", quiet=True,
                           name=[newfdata, newbuffer, newodata])
+    return 0
 
 
 def spawn(func):
@@ -194,7 +195,7 @@ def main():
     doug = options["douglas_thres"]
     out = options["output"]
     out_file = options["out_file"]
-    nproc = options["nprocs"]
+    nproc = int(options["nprocs"])
 
     # Check if input files exist
     if not grass.find_file(name=osm, element='vector')['file']:
@@ -279,10 +280,16 @@ def main():
                                      quiet=True)).split("\n")[0:-1]
 
     # Create new vector map
-    grass.run_command("v.edit", map="patch_" + processid+"_0_0", tool="create", quiet=True)
+    grass.run_command("v.edit", map="patch_" + processid+"_0_0", tool="create",
+                      quiet=True)
 
     list_feature = grass.read_command("v.db.select", map=ref, columns="cat",
                                       flags="c", quiet=True).split("\n")[0:-1]
+
+    olddb = grass.db_connection()
+    grass.run_command("db.connect", driver="pg", database="grassdata")
+    grass.run_command("db.login", user="lucadelu", port="5432",
+                      host="localhost", overwrite=True)
 
     # multiprocessing stuff for Angular coefficient Comparison
     q_in = Queue(1)
@@ -292,19 +299,26 @@ def main():
     for proc in procs:
         proc.daemon = True
         proc.start()
+    print "PRIMA SENT"
     # for each file create the polygon of bounding box
-    sent = [q_in.put((f, processid, ref, osm, bf, list_lines,
-                      angle_thres)) for f in list_feature]
-
+    [q_in.put((f, processid, ref, osm, bf, list_lines,
+               angle_thres)) for f in list_feature]
+    print "DOPO SENT"
     # set the end of the cycle
     [q_in.put((None, None, None, None, None, None, None)) for proc in procs]
+    print "DOPO NONE"
     [proc.join() for proc in procs]
-    processed = [q_out.get() for _ in range(len(sent))]
-    errors = [p for p in processed if not p[2]]
+    print "DOPO JOIN"
+    processed = [q_out.get() for _ in procs]
+    print "DOPO GET"
+    errors = [p for p in processed if p]
+    print "DOPO ERRORS"
     if errors:
         print "Some errors occurred during analysis"
         return 0
 
+    grass.run_command("db.connect", driver=olddb['driver'],
+                      database=olddb['database'])
     # Clean output map
     last_map = grass.read_command("g.list", type="vect", pattern="patch*",
                                   quiet=True).split("\n")[0:-1]
@@ -346,7 +360,7 @@ def main():
     print("Difference between OSM original and processed datasets length: %s m (%s%%)\n"%(round(diff_osm,1),round(diff_p_osm,1)))
     print("Difference between REF dataset and processed OSM dataset length: %s m (%s%%)\n"%(round(diff_new,1),round(diff_p_new,1)))
     print("#####################################################################\n")
-
+    return 0
 
 if __name__ == "__main__":
     options, flags = grass.parser()
