@@ -3,6 +3,7 @@
 ##############################################################################
 # MODULE:    v.osm.preproc
 # AUTHOR(S): Monia Molinari, Marco Minghini
+#            Luca Delucchi added multiprocessing
 # PURPOSE:   Tool for extracting road features in the OSM dataset which have a correspondence in the reference dataset
 # COPYRIGHT: (C) 2015 by the GRASS Development Team
 #
@@ -232,7 +233,6 @@ def main():
                           pattern="{st}".format(st=processid))
         grass.fatal(_("No OSM data for comparison"))
 
-
     # Generalize
     if doug:
         grass.run_command("v.generalize", input=ref, output=ref_gen,
@@ -339,27 +339,38 @@ def main():
     # Calculate final map statistics
     l_osm_proc = length(out)
     diff_osm = l_osm - l_osm_proc
-    diff_p_osm = diff_osm/l_osm*100
+    diff_p_osm = diff_osm / l_osm * 100
     diff_new = l_ref - l_osm_proc
-    diff_p_new = diff_new/l_ref*100
+    diff_p_new = diff_new / l_ref * 100
 
+    refl = "REF dataset length: {lr} m\n".format(lr=round(l_ref, 1))
+    osml = "Original OSM dataset length: {lo} m\n".format(lo=round(l_osm, 1))
+    pol = "Processed OSM dataset length: {lo} m\n".format(lo=round(l_osm_proc,
+                                                                   1))
+    dp = "Difference between OSM original and processed datasets length: " \
+         "{df} m ({dfp}%)\n".format(df=round(diff_osm, 1),
+                                    dfp=round(diff_p_osm, 1))
+    do = "Difference between REF dataset and processed OSM dataset length: " \
+         "{df} m ({dfp}%)\n".format(df=round(diff_new, 1),
+                                    dfp=round(diff_p_new, 1))
     #  Write output file with statistics (if required)
     if len(out_file) > 0:
-        fil=open(out_file, "w")
-        fil.write("REF dataset length: %s m\n"%(round(l_ref,1)))
-        fil.write("Original OSM dataset length: %s m\n"%(round(l_osm,1)))
-        fil.write("Processed OSM dataset length: %s m\n"%(round(l_osm_proc,1)))
-        fil.write("Difference between OSM original and processed datasets length: %s m (%s%%)\n"%(round(diff_osm,1),round(diff_p_osm,1)))
-        fil.write("Difference between REF dataset and processed OSM dataset length: %s m (%s%%)\n"%(round(diff_new,1),round(diff_p_new,1)))
+        fil = open(out_file, "w")
+        fil.write(refl)
+        fil.write(osml)
+        fil.write(pol)
+        fil.write(dp)
+        fil.write(do)
         fil.close()
 
     # Print statistics
-    print("#####################################################################\n")
-    print("Original OSM dataset length: %s m\n"%(round(l_osm,1)))
-    print("Processed OSM dataset length: %s m\n"%(round(l_osm_proc,1)))
-    print("Difference between OSM original and processed datasets length: %s m (%s%%)\n"%(round(diff_osm,1),round(diff_p_osm,1)))
-    print("Difference between REF dataset and processed OSM dataset length: %s m (%s%%)\n"%(round(diff_new,1),round(diff_p_new,1)))
-    print("#####################################################################\n")
+    print("################################################################\n")
+    print(refl)
+    print(osml)
+    print(pol)
+    print(dp)
+    print(do)
+    print("################################################################\n")
     return 0
 
 if __name__ == "__main__":
