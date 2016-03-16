@@ -184,7 +184,7 @@ def main():
     if not grass.find_file(name=ref, element='vector')['file']:
         grass.fatal(_("Vector map <%s> not found") % ref)
 
-    if grass.find_file(name=output, element='vector')['file']:
+    if grass.find_file(name=output, element='vector')['file'] and not grass.overwrite:
         grass.fatal(_("Vector map <%s> already exists") % output)
 
     if len(grid) > 0:
@@ -243,26 +243,28 @@ def main():
 
     if (len(grid) == 0 and len(ul_grid) > 0 and len(lr_grid) > 0 and
        len(box_grid) > 0 and len(output) > 0):
-        n = float(ul_grid.split(",")[0])
-        w = float(ul_grid.split(",")[1])
-        s = float(lr_grid.split(",")[0])
-        e = float(lr_grid.split(",")[1])
+        nor = float(ul_grid.split(",")[1])
+        west = float(ul_grid.split(",")[0])
+        sud = float(lr_grid.split(",")[1])
+        est = float(lr_grid.split(",")[0])
         nsres = float(box_grid.split(",")[1])
         ewres = float(box_grid.split(",")[0])
-        MakeGrid(n, w, s, e, nsres, ewres, tmp_output)
+        MakeGrid(nor, west, sud, est, nsres, ewres, tmp_output)
     if (len(grid) == 0 and len(ul_grid) == 0 and len(lr_grid) == 0 and
        len(box_grid) == 0 and len(output) > 0):
         grass.run_command("g.region", vect=ref, quiet=True)
-        grass.run_command("v.in.region", output=output, quiet=True)
-        grass.run_command("v.db.addtable", map=output, quiet=True)
-
+        grass.run_command("v.in.region", output=output, quiet=True,
+                          overwrite=grass.overwrite)
+        grass.run_command("v.db.addtable", map=output, quiet=True,
+                          overwrite=grass.overwrite)
     # Extract box id with where OSM data exists
     if not (len(grid) == 0 and len(ul_grid) == 0 and len(lr_grid) == 0 and
             len(box_grid) == 0 and len(output) > 0):
         grass.run_command("v.select", ainput=tmp_output, binput=osm,
-                          operator="overlap", output=output, quiet=True)
-        list_box = GetList(output)
+                          operator="overlap", output=output, quiet=True,
+                          overwrite=grass.overwrite)
 
+    list_box = GetList(output)
     # Get tolerance values and evaluate
     if len(tol_eval) > 0:
         list_tol = tol_eval.split(",")
