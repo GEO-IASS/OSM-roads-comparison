@@ -362,16 +362,16 @@ def main():
         fil.write(dp)
         fil.write(do)
         fil.close()
-
-    # Print statistics
-    print("################################################################\n")
-    print(refl)
-    print(osml)
-    print(pol)
-    print(dp)
-    print(do)
-    print("################################################################\n")
-    return 0
+    else:
+        # Print statistics
+        print("############################################################\n")
+        print(refl)
+        print(osml)
+        print(pol)
+        print(dp)
+        print(do)
+        print("############################################################\n")
+        return 0
 
 if __name__ == "__main__":
     options, flags = grass.parser()
