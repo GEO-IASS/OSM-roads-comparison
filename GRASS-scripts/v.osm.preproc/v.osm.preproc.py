@@ -74,6 +74,11 @@
 #% answer: 1
 #%end
 
+#%flag
+#% key: g
+#% description: Print the stats in shell script style
+#%end
+
 import math
 import sys
 import time
@@ -343,16 +348,27 @@ def main():
     diff_new = l_ref - l_osm_proc
     diff_p_new = diff_new / l_ref * 100
 
-    refl = "REF dataset length: {lr} m\n".format(lr=round(l_ref, 1))
-    osml = "Original OSM dataset length: {lo} m\n".format(lo=round(l_osm, 1))
-    pol = "Processed OSM dataset length: {lo} m\n".format(lo=round(l_osm_proc,
-                                                                   1))
-    dp = "Difference between OSM original and processed datasets length: " \
-         "{df} m ({dfp}%)\n".format(df=round(diff_osm, 1),
-                                    dfp=round(diff_p_osm, 1))
-    do = "Difference between REF dataset and processed OSM dataset length: " \
-         "{df} m ({dfp}%)\n".format(df=round(diff_new, 1),
-                                    dfp=round(diff_p_new, 1))
+    dpp = None
+    dop = None
+    if flags['g']:
+        refl = "ref_len={lr}\n".format(lr=round(l_ref, 1))
+        osml = "orig_osm_len={lo}\n".format(lo=round(l_osm, 1))
+        pol = "proc_osm_len={lo}\n".format(lo=round(l_osm_proc, 1))
+        dp = "diff_orig_osm_len={df}".format(df=round(diff_osm, 1))
+        dpp = "diff_orig_osm_len_perc={dfp}".format(dfp=round(diff_p_osm, 1))
+        do = "diff_proc_osm_len={df}\n".format(df=round(diff_new, 1))
+        dop = "diff_proc_osm_len_perc={dfp}\n".format(dfp=round(diff_p_new, 1))
+    else:
+        refl = "REF dataset length: {lr} m\n".format(lr=round(l_ref, 1))
+        osml = "Original OSM dataset length: {lo} m\n".format(lo=round(l_osm,
+                                                                       1))
+        pol = "Processed OSM dataset length: {lo} m\n".format(lo=round(l_osm_proc, 1))
+        dp = "Difference between OSM original and processed datasets length:" \
+             " {df} m ({dfp}%)\n".format(df=round(diff_osm, 1),
+                                         dfp=round(diff_p_osm, 1))
+        do = "Difference between REF dataset and processed OSM dataset " \
+             "length: {df} m ({dfp}%)\n".format(df=round(diff_new, 1),
+                                                dfp=round(diff_p_new, 1))
     #  Write output file with statistics (if required)
     if len(out_file) > 0:
         fil = open(out_file, "w")
@@ -360,7 +376,11 @@ def main():
         fil.write(osml)
         fil.write(pol)
         fil.write(dp)
+        if dpp:
+            fil.write(dpp)
         fil.write(do)
+        if dop:
+            fil.write(dop)
         fil.close()
     else:
         # Print statistics
@@ -369,7 +389,11 @@ def main():
         print(osml)
         print(pol)
         print(dp)
+        if dpp:
+            print(dpp)
         print(do)
+        if dop:
+            print(dop)
         print("############################################################\n")
         return 0
 
