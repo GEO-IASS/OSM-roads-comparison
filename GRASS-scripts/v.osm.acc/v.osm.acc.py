@@ -155,10 +155,10 @@ def length(data):
 def CalcTol(data1, data2, value):
     processid = str(time.time()).replace(".", "_")
     grass.run_command("v.buffer", input=data1, distance=value,
-                      output="data1_buf_{pf}".format(pr=processid), quiet=True)
+                      output="data1_buf_{pr}".format(pr=processid), quiet=True)
     grass.run_command("v.overlay", ainput=data2, atype="line", operator="and",
                       binput="data1_buf_{pr}".format(pr=processid), quiet=True,
-                      btype="area", output="data2_in_{pr}".format(processid))
+                      btype="area", output="data2_in_{pr}".format(pr=processid))
     val = length("data2_in_" + processid)
     grass.run_command("g.remove", type="vect", flags="fr", quiet=True,
                       pattern="*{pr}*".format(pr=processid))
